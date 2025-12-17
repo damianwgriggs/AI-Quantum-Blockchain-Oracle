@@ -1,0 +1,107 @@
+import time
+import requests
+import json
+import webbrowser
+import os
+from web3 import Web3
+import google.generativeai as genai
+
+# --- 1. CONFIGURATION ---
+PRIVATE_KEY = "YOURPRIVATEKEY"
+GEMINI_API_KEY = "YOURAPIKEY"
+WALLET_ADDRESS_RAW = "YOURWALLETADDRESS"
+CONTRACT_ADDRESS_RAW = "0xcF25818ca59f49Ac9ee6039e4ec49f20bc820036"
+
+# --- 2. SETUP ---
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash') 
+
+w3 = Web3(Web3.HTTPProvider('https://api.avax-test.network/ext/bc/C/rpc'))
+
+WALLET_ADDRESS = w3.to_checksum_address(WALLET_ADDRESS_RAW)
+CONTRACT_ADDRESS = w3.to_checksum_address(CONTRACT_ADDRESS_RAW)
+
+contract_abi = [
+    {"inputs": [{"internalType": "address","name": "to","type": "address"},{"internalType": "string","name": "uri","type": "string"}],"name": "safeMint","outputs": [],"stateMutability": "nonpayable","type": "function"},
+    {"inputs": [],"name": "owner","outputs": [{"internalType": "address","name": "","type": "address"}],"stateMutability": "view","type": "function"}
+]
+
+# --- 3. FUNCTIONS ---
+
+def get_quantum_seed():
+    try:
+        response = requests.get('https://qn100.anu.edu.au/API/jsonI.php?length=1&type=uint16', timeout=5)
+        return response.json()['data'][0]
+    except:
+        return int(time.time_ns()) % 1000000
+
+def dream_with_gemini(seed):
+    prompt_for_ai = f"Interpret the quantum energy of the number {seed}. Create a celestial cosmic art prompt under 40 words."
+    try:
+        response = model.generate_content(prompt_for_ai)
+        return response.text.strip()
+    except:
+        return "An iridescent quantum field pulsating with violet light, 8k."
+
+def paint_with_pollinations(art_prompt, seed):
+    encoded_prompt = requests.utils.quote(art_prompt)
+    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?seed={seed}&width=1024&height=1024&nologo=true&model=flux"
+
+def mint_nft(image_url):
+    print("⛓️  Minting to Avalanche Fuji...")
+    
+    try:
+        contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=contract_abi)
+        nonce = w3.eth.get_transaction_count(WALLET_ADDRESS)
+        
+        # Get latest block for fee data (EIP-1559)
+        latest_block = w3.eth.get_block('latest')
+        base_fee = latest_block['baseFeePerGas']
+        priority_fee = w3.to_wei(2, 'gwei') # Tip for the miner
+        max_fee = base_fee + priority_fee
+
+        # 1. Prepare data for gas estimation
+        mint_call = contract.functions.safeMint(WALLET_ADDRESS, image_url)
+        
+        # 2. Try to estimate gas; if it fails here, the contract logic is the issue
+        try:
+            gas_estimate = mint_call.estimate_gas({'from': WALLET_ADDRESS})
+            print(f"   ⛽ Estimated Gas: {gas_estimate}")
+        except Exception as ge:
+            print(f"   ⚠️ Gas estimation failed: {ge}. Using fallback limit.")
+            gas_estimate = 500000 
+
+        # 3. Build EIP-1559 Transaction
+        tx = mint_call.build_transaction({
+            'chainId': 43113,
+            'maxFeePerGas': max_fee,
+            'maxPriorityFeePerGas': priority_fee,
+            'gas': int(gas_estimate * 1.2), # Add 20% buffer
+            'nonce': nonce,
+        })
+
+        # Sign & Send
+        signed_tx = w3.eth.account.sign_transaction(tx, PRIVATE_KEY)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+        
+        print("✅ Transaction Sent! Waiting for confirmation...")
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+        
+        if receipt.status == 1:
+            print(f"🎉 SUCCESS! View: https://testnet.snowtrace.io/tx/{w3.to_hex(tx_hash)}")
+        else:
+            print(f"❌ Transaction REVERTED. Check: https://testnet.snowtrace.io/tx/{w3.to_hex(tx_hash)}")
+        
+    except Exception as e:
+        print(f"❌ Minting Failed: {e}")
+
+if __name__ == "__main__":
+    print("\n--- INITIATING QUANTUM CENTAUR PROTOCOL ---\n")
+    seed = get_quantum_seed()
+    print(f"🔮 Quantum Seed: {seed}")
+    art_prompt = dream_with_gemini(seed)
+    print(f"🧠 Gemini Imagined: {art_prompt}")
+    image_url = paint_with_pollinations(art_prompt, seed)
+    print(f"🎨 URL: {image_url}")
+    mint_nft(image_url)
+    print("\n--- CYCLE COMPLETE ---")
